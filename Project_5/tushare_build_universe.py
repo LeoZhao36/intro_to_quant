@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from tushare_client import pro
+from tushare_setup import pro
 
 # Force line-buffered stdout for clean progress output
 try:

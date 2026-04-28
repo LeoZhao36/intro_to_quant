@@ -62,7 +62,7 @@ from typing import Callable
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from tushare_client import pro
+from tushare_setup import pro
 
 
 # ---------------------------------------------------------------------------

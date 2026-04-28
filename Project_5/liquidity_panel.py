@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from tushare_client import pro
+from tushare_setup import pro
 
 try:
     sys.stdout.reconfigure(line_buffering=True)

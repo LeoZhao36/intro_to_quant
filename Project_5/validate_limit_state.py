@@ -27,7 +27,7 @@ import pandas as pd
 # Project-root relative import. Adjust if project1_utils.py lives elsewhere.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils import limit_state, _classify_board, _LIMIT_PCT
-from tushare_client import pro
+from tushare_setup import pro
 
 
 # ---------------------------------------------------------------------------

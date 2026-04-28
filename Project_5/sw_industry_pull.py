@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from tushare_client import pro
+from tushare_setup import pro
 
 DATA = Path("data")
 SW_CLASSIFICATION_PATH = DATA / "sw_classification.csv"

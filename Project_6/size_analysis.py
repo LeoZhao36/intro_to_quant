@@ -28,6 +28,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 
 from factor_utils import (
+    GRAPHS_DIR,
     load_panel,
     compute_quintile_series,
     compute_ic_series,
@@ -69,11 +70,11 @@ if __name__ == "__main__":
     # Plots --------------------------------------------------------------
     plot_cumulative_quintiles(
         quintiles, FACTOR_LABEL,
-        save_path=Path(f"{OUTPUT_PREFIX}_quintile_cumulative_returns.png"),
+        save_path=GRAPHS_DIR / f"{OUTPUT_PREFIX}_quintile_cumulative_returns.png",
     )
     plot_ic_series(
         ic, FACTOR_LABEL,
-        save_path=Path(f"{OUTPUT_PREFIX}_ic_time_series.png"),
+        save_path=GRAPHS_DIR / f"{OUTPUT_PREFIX}_ic_time_series.png",
     )
 
     # Pass 1 robustness --------------------------------------------------

@@ -13,7 +13,8 @@ factor column is a parameter (`factor_col`) passed by the caller.
 Contents
 --------
 Constants
-  DATA_DIR, UNIVERSE_PATH, RETURN_PATH, SECTOR_PATH
+  DATA_DIR, GRAPHS_DIR
+  UNIVERSE_PATH, RETURN_PATH, SECTOR_PATH, EP_PANEL_PATH
   REGIME_EVENTS, REGIME_SPLIT_DATE
   SEED, MIN_STOCKS_PER_SECTOR
 
@@ -76,9 +77,14 @@ plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "DejaVu Sans"]
 plt.rcParams["axes.unicode_minus"] = False
 
 DATA_DIR = Path("data")
+GRAPHS_DIR = Path("graphs")
 UNIVERSE_PATH = DATA_DIR / "universe_membership.csv"
 RETURN_PATH = DATA_DIR / "forward_return_panel.csv"
 SECTOR_PATH = DATA_DIR / "sw_membership.csv"
+EP_PANEL_PATH = DATA_DIR / "ep_panel.csv"
+
+# Auto-create graphs directory so plotting calls don't fail on first run.
+GRAPHS_DIR.mkdir(exist_ok=True)
 
 REGIME_EVENTS = {
     "雪球 meltdown": pd.Timestamp("2024-01-15"),
@@ -329,6 +335,11 @@ def residualise_factor_per_date(
     Per rebalance_date, regress factor_col on sector dummies and add a
     residual column to the returned DataFrame.
 
+    Rows with NaN in factor_col or sector_col are excluded from the
+    regression (np.linalg.lstsq propagates NaN otherwise). Their residual
+    column entries remain NaN, which causes them to be dropped naturally
+    by downstream pd.qcut and IC calculations.
+
     Sectors with fewer than min_stocks_per_sector stocks at a given date
     are collapsed into 'other' before the regression to avoid singular
     dummy matrices.
@@ -352,24 +363,33 @@ def residualise_factor_per_date(
     out_residuals = np.full(len(df), np.nan)
 
     for date, group in df.groupby("rebalance_date"):
-        idx = group.index.to_numpy()
-        sector_counts = group[sector_col].value_counts()
+        # Restrict the regression to rows with valid factor and sector
+        # values. NaN rows keep their NaN residual entry, which excludes
+        # them from the downstream quintile sort.
+        valid_mask = group[factor_col].notna() & group[sector_col].notna()
+        if valid_mask.sum() < 2:
+            continue
+
+        valid_group = group[valid_mask]
+        valid_idx = valid_group.index.to_numpy()
+
+        sector_counts = valid_group[sector_col].value_counts()
         small_sectors = sector_counts[sector_counts < min_stocks_per_sector].index
-        sectors_clean = group[sector_col].where(
-            ~group[sector_col].isin(small_sectors), "other"
+        sectors_clean = valid_group[sector_col].where(
+            ~valid_group[sector_col].isin(small_sectors), "other"
         )
 
         dummies = pd.get_dummies(sectors_clean, drop_first=True, dtype=float)
         if dummies.shape[1] == 0:
-            # Only one sector at this date; residual is just demeaned factor.
-            y = group[factor_col].values
+            # Only one sector among valid rows; residual is demeaned factor.
+            y = valid_group[factor_col].values
             resid = y - y.mean()
         else:
-            X = np.column_stack([np.ones(len(group)), dummies.values])
-            y = group[factor_col].values
+            X = np.column_stack([np.ones(len(valid_group)), dummies.values])
+            y = valid_group[factor_col].values
             beta, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
             resid = y - X @ beta
-        out_residuals[idx] = resid
+        out_residuals[valid_idx] = resid
 
     df[output_col] = out_residuals
     return df
