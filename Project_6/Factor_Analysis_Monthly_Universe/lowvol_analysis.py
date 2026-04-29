@@ -1,52 +1,59 @@
 """
-momentum_analysis.py
+lowvol_analysis.py
 
-Project 6 Session 4: momentum-factor analysis pipeline.
+Project 6 Session 5: low-volatility factor analysis pipeline.
 
-Multi-horizon sweep: runs mom_12_1, mom_6_1, mom_3_1, mom_1_1 in one
-script execution and produces a cross-horizon comparison table at the end.
+Multi-horizon sweep analogous to momentum_analysis.py: runs vol_12_1,
+vol_6_1, vol_3_1 in one execution and produces a cross-horizon
+comparison table at the end.
 
-Coverage relaxation
--------------------
-Stocks with at least min_coverage * lookback observed months in the
-formation window are eligible. Missing months for those stocks are
-filled with the cross-sectional median forward return for those dates
-(computed across stocks that had data on those dates), then the
-cumulative product is taken across the resulting fully-populated window.
-
-Threshold rounding: pandas integer >= float threshold effectively
-rounds the threshold UP. So mom_12_1 with min_coverage=0.75 requires
-9 observed months (imputes up to 3); mom_6_1 requires 5 (imputes up
-to 1); mom_3_1 requires 3 (no imputation possible, all-or-nothing);
-mom_1_1 requires 1 (the single formation month must be observed).
-
-Imputation introduces a small bias: out-of-universe stocks (which were
-larger by market cap) likely had different returns from in-universe
-stocks during their absences, but we fill with the in-universe
-cross-sectional median. Documented as a known limitation. The clean
-fix is a panel-construction improvement (full return histories for all
-ts_codes that ever appeared, with the universe filter applied only at
-the cross-sectional sort step) deferred until after all single-factor
-tests and the first multi-factor analysis are complete.
-
-Run from Project_6/ as: `python momentum_analysis.py`
-No data sourcing prerequisite.
+vol_K_S = standard deviation of monthly forward returns over the past
+K months, ending S months before the rebalance date. Larger values
+mean a more volatile recent return path. The "low-vol anomaly" is the
+empirical finding that lower-volatility stocks tend to outperform
+higher-volatility stocks on a risk-adjusted basis (and often on an
+absolute basis), opposite of what CAPM predicts.
 
 Sign convention
 ---------------
-Q1 = LOW past return = recent losers.
-Q5 = HIGH past return = recent winners.
+Q1 = LOW volatility (least volatile recent path).
+Q5 = HIGH volatility (most volatile recent path).
 
-Continuation: Q5 > Q1, i.e. Q1-Q5 < 0, IC > 0.
-Reversal:     Q1 > Q5, i.e. Q1-Q5 > 0, IC < 0.
+Low-vol hypothesis: Q1 > Q5 in future returns, i.e. Q1-Q5 > 0, IC < 0.
+CAPM-style risk premium hypothesis: Q5 > Q1, i.e. Q1-Q5 < 0, IC > 0.
 
-Logged predictions across all four horizons
--------------------------------------------
-Most probability mass on POSITIVE Q1-Q5 / NEGATIVE IC (reversal),
-with the strongest reversal expected at the shortest horizons (mom_1_1,
-mom_3_1) per LSY's "any window" claim. Magnitudes likely larger at
-shorter horizons because the overreaction-then-correction mechanism
-operates on faster timescales.
+Logged prediction
+-----------------
+Q1-Q5 in [-0.2%, +1.5%]/mo at t in [-0.5, +2.5], IC in [-0.05, +0.01],
+with most probability mass on POSITIVE Q1-Q5 / NEGATIVE IC. Higher
+confidence than momentum (LSY 2019 documents a robust volatility
+anomaly in China, and the lottery-preference mechanism is well-suited
+to retail-dominated small caps), comparable to value's confidence.
+
+Imputation handling (note vs. momentum)
+---------------------------------------
+For momentum, missing months in the formation window were filled
+with the cross-sectional median because the factor is a cumulative
+PRODUCT, where a missing month would otherwise drop a factor.
+Median imputation is roughly bias-neutral for the cumulative product.
+
+For volatility, the factor is a STANDARD DEVIATION. Imputing with
+the cross-sectional median sits at the centre of the cross-section
+by construction, contributing less dispersion than a real observation
+would. Imputed stocks would systematically come out with artificially
+low std and get sorted toward Q1, contaminating the test toward the
+hypothesis we are testing for.
+
+The cleaner alternative used here: same eligibility threshold (>= 75%
+of formation-window months observed) but std computed on the OBSERVED
+months only, via pandas rolling.std() with
+min_periods=ceil(0.75 * lookback). No imputation enters the std
+calculation itself. Stocks at exactly the 75% threshold for vol_12_1
+have std computed on 9 observations instead of 12 (marginally noisier
+estimate, but unbiased in the direction we care about).
+
+Run from Project_6/ as: `python lowvol_analysis.py`
+No data sourcing prerequisite.
 """
 
 from pathlib import Path
@@ -54,7 +61,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from factor_utils import (
+from Project_6.Factor_Analysis_Monthly_Universe.factor_utils import (
     DATA_DIR,
     GRAPHS_DIR,
     load_panel,
@@ -72,50 +79,50 @@ from factor_utils import (
 
 
 # Sweep configuration -----------------------------------------------------
-# Each tuple is (lookback, skip). Edit this list to change which horizons run.
 HORIZON_CONFIGS = [
-    (12, 1),  # mom_12_1: JT canonical
-    (6, 1),   # mom_6_1:  medium-term
-    (3, 1),   # mom_3_1:  short-term
-    (1, 1),   # mom_1_1:  classic short-term reversal
+    (12, 1),  # vol_12_1: 12-month formation, the most stable estimator
+    (6, 1),   # vol_6_1:  6-month formation
+    (3, 1),   # vol_3_1:  3-month formation (very noisy with only 3 obs per std)
 ]
 
-# Minimum fraction of formation-window months that must have observed
-# (non-imputed) forward returns for a stock to be eligible at a given date.
 MIN_COVERAGE = 0.75
 
-SUMMARY_CSV = DATA_DIR / "momentum_horizons_summary.csv"
+SUMMARY_CSV = DATA_DIR / "lowvol_horizons_summary.csv"
 
 
-def add_momentum_to_panel(
+def add_volatility_to_panel(
     panel: pd.DataFrame,
     lookback: int,
     skip: int,
     min_coverage: float = MIN_COVERAGE,
-    momentum_col: str = None,
+    vol_col: str = None,
 ) -> pd.DataFrame:
     """
-    Compute past-return momentum from forward_return inside the panel itself,
-    with optional cross-sectional median imputation for stocks that meet the
-    coverage threshold but have some missing months in the formation window.
+    Compute realised monthly volatility from forward_return inside the
+    panel itself, using observed values only (no imputation).
+
+    Uses pandas rolling().std() with min_periods, which computes std
+    on whatever non-NaN values are inside the window as long as there
+    are at least min_periods of them. Mirrors momentum's eligibility
+    threshold (75% min coverage) but skips the median-imputation step
+    because that step would bias std downward for imputed stocks.
 
     Parameters
     ----------
     panel : DataFrame from load_panel(), with rebalance_date, ts_code,
         forward_return.
-    lookback : K in mom_K_S notation.
-    skip : S in mom_K_S notation. JT 1993 uses skip=1.
-    min_coverage : minimum fraction of formation-window months that must
-        be observed (non-imputed) for a stock to be eligible at a given
-        date. Default MIN_COVERAGE (0.75).
-    momentum_col : optional column name. Defaults to f"mom_{lookback}_{skip}".
+    lookback : K in vol_K_S notation.
+    skip : S in vol_K_S notation.
+    min_coverage : minimum fraction of formation-window months that
+        must be observed for a stock to be eligible at a given date.
+    vol_col : optional column name. Defaults to f"vol_{lookback}_{skip}".
 
     Returns
     -------
-    Panel with the momentum column added.
+    Panel with the volatility column added on (rebalance_date, ts_code).
     """
-    if momentum_col is None:
-        momentum_col = f"mom_{lookback}_{skip}"
+    if vol_col is None:
+        vol_col = f"vol_{lookback}_{skip}"
 
     # Pivot to (date x stock) matrix of forward returns.
     fr_matrix = panel.pivot_table(
@@ -125,42 +132,27 @@ def add_momentum_to_panel(
         aggfunc="mean",
     ).sort_index()
 
-    # Real-data indicator: 1.0 where observed, 0.0 where missing.
-    is_observed = fr_matrix.notna().astype(float)
+    # ceil ensures we round threshold UP, matching momentum's threshold.
+    threshold = max(2, int(np.ceil(min_coverage * lookback)))
 
-    # Cross-sectional median per date (computed across stocks with data).
-    cs_median = fr_matrix.median(axis=1)
+    # Rolling std on observed values, then shift forward by skip+1 to
+    # align the formation window end (index i-skip-1) with row i.
+    vol_wide = (
+        fr_matrix
+        .rolling(window=lookback, min_periods=threshold)
+        .std()
+        .shift(skip + 1)
+    )
 
-    # Impute: fill NaN cells with the cross-sectional median for that date.
-    # Use the transpose pattern so fillna aligns the median series with
-    # the (now-column-indexed) dates, broadcasting across stocks.
-    fr_imputed = fr_matrix.T.fillna(cs_median).T
-
-    # log(1+r) so cumulating becomes a rolling sum.
-    log_returns = np.log1p(fr_imputed)
-
-    # Rolling sum of log returns and rolling count of OBSERVED months,
-    # both shifted forward by skip+1 to align with the formation window
-    # ending at index i-skip-1 for date t_i.
-    log_momentum = log_returns.rolling(lookback).sum().shift(skip + 1)
-    observed_count = is_observed.rolling(lookback).sum().shift(skip + 1)
-
-    # Mask: keep momentum only where observed_count >= threshold.
-    threshold = min_coverage * lookback
-    log_momentum_masked = log_momentum.where(observed_count >= threshold)
-
-    # Convert log-cumulative return back to simple cumulative return.
-    momentum_wide = np.expm1(log_momentum_masked)
-
-    # Stack to long format and merge.
-    momentum_long = (
-        momentum_wide.stack()
-        .rename(momentum_col)
+    # Stack and merge.
+    vol_long = (
+        vol_wide.stack()
+        .rename(vol_col)
         .reset_index()
     )
 
     panel_out = panel.merge(
-        momentum_long,
+        vol_long,
         on=["rebalance_date", "ts_code"],
         how="left",
     )
@@ -173,12 +165,9 @@ def run_one_horizon(
     skip: int,
     min_coverage: float,
 ) -> dict:
-    """
-    Add the momentum column for (lookback, skip) and run the full five-layer
-    machinery. Returns a dict of summary stats for the cross-horizon table.
-    """
-    name = f"mom_{lookback}_{skip}"
-    label = f"momentum {lookback}-{skip} (cumulative past return)"
+    """Add the vol column for (lookback, skip) and run all five layers."""
+    name = f"vol_{lookback}_{skip}"
+    label = f"volatility {lookback}-{skip} (std of past monthly returns)"
 
     print(f"\n\n{'#' * 76}")
     print(
@@ -188,7 +177,7 @@ def run_one_horizon(
     )
     print(f"{'#' * 76}")
 
-    panel = add_momentum_to_panel(
+    panel = add_volatility_to_panel(
         panel_base,
         lookback=lookback,
         skip=skip,
@@ -196,11 +185,11 @@ def run_one_horizon(
     )
 
     # Coverage diagnostics ---------------------------------------------------
-    n_with_mom = int(panel[name].notna().sum())
+    n_with_vol = int(panel[name].notna().sum())
     n_total = len(panel)
-    coverage_pct = n_with_mom / n_total * 100
+    coverage_pct = n_with_vol / n_total * 100
     print(
-        f"  Coverage: {n_with_mom:,} of {n_total:,} rows ({coverage_pct:.1f}%)"
+        f"  Coverage: {n_with_vol:,} of {n_total:,} rows ({coverage_pct:.1f}%)"
     )
     coverage_per_date = (
         panel.groupby("rebalance_date")[name]
@@ -218,12 +207,30 @@ def run_one_horizon(
         )
     print(f"  Burn-in dates: {n_burn_in}; testable dates: {n_test}")
 
+    # Volatility distribution sanity check ------------------------------------
+    vol_clean = panel[name].dropna()
+    if len(vol_clean) > 0:
+        print(
+            f"\n  {name} distribution (cross-section x time): "
+            f"n={len(vol_clean):,}, "
+            f"mean={vol_clean.mean()*100:.2f}%, "
+            f"median={vol_clean.median()*100:.2f}%, "
+            f"p5={vol_clean.quantile(0.05)*100:.2f}%, "
+            f"p95={vol_clean.quantile(0.95)*100:.2f}%"
+        )
+
     # Headline ---------------------------------------------------------------
     print(f"\n  --- Headline ---")
     quintiles = compute_quintile_series(panel, sort_col=name)
     headline = summarise_long_short(quintiles, "headline Q1-Q5")
     ic = compute_ic_series(panel, sort_col=name)
     print(f"  IC: mean={ic.mean():+.4f}, std={ic.std():.4f}, n={len(ic)}")
+    print(
+        f"  (For {name}: Q1 = LOW vol = least volatile; "
+        f"Q5 = HIGH vol = most volatile.\n"
+        f"   Low-vol hypothesis: Q1 > Q5, i.e. Q1-Q5 > 0, IC < 0.\n"
+        f"   CAPM-style risk premium: Q5 > Q1, i.e. Q1-Q5 < 0, IC > 0.)"
+    )
 
     # Plots ------------------------------------------------------------------
     plot_cumulative_quintiles(
@@ -264,7 +271,7 @@ def print_cross_horizon_table(all_results: list) -> None:
     print(f"\n\n{'=' * 110}")
     print(
         "Cross-horizon summary  "
-        "(sign convention: Q1-Q5 < 0 = continuation, > 0 = reversal)"
+        "(sign convention: Q1-Q5 > 0 = low-vol works, Q1-Q5 < 0 = high-vol risk premium)"
     )
     print('=' * 110)
 
@@ -311,7 +318,7 @@ def print_cross_horizon_table(all_results: list) -> None:
 
 
 def save_summary_csv(all_results: list, save_path: Path) -> None:
-    """Persist the cross-horizon summary for future reference."""
+    """Persist the cross-horizon summary."""
     rows = []
     for r in all_results:
         h = r["headline"]
@@ -365,5 +372,5 @@ if __name__ == "__main__":
     save_summary_csv(all_results, SUMMARY_CSV)
 
     print(f"\n{'=' * 76}")
-    print("Multi-horizon momentum-factor analysis complete.")
+    print("Multi-horizon low-volatility factor analysis complete.")
     print('=' * 76)

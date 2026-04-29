@@ -73,7 +73,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from factor_utils import (
+from Project_6.Factor_Analysis_Monthly_Universe.factor_utils import (
     DATA_DIR,
     GRAPHS_DIR,
     REGIME_EVENTS,
@@ -81,9 +81,9 @@ from factor_utils import (
     load_panel,
 )
 from hypothesis_testing import block_bootstrap_ci
-from value_analysis import add_ep_to_panel
-from lowvol_analysis import add_volatility_to_panel
-from composite_value_lowvol_analysis import cross_sectional_zscore
+from Project_6.Factor_Analysis_Monthly_Universe.value_analysis import add_ep_to_panel
+from Project_6.Factor_Analysis_Monthly_Universe.lowvol_analysis import add_volatility_to_panel
+from Project_6.Factor_Analysis_Monthly_Universe.composite_value_lowvol_analysis import cross_sectional_zscore
 
 
 # Configuration ---------------------------------------------------------
@@ -277,7 +277,7 @@ def print_metrics_table(metrics: pd.DataFrame) -> None:
 
 def regime_split_report(returns: pd.DataFrame, split_date: pd.Timestamp) -> None:
     """Per-regime mean and Sharpe for each strategy."""
-    from factor_utils import REGIME_SPLIT_DATE
+    from Project_6.Factor_Analysis_Monthly_Universe.factor_utils import REGIME_SPLIT_DATE
     aligned = returns.dropna()
     pre = aligned[aligned.index < split_date]
     post = aligned[aligned.index >= split_date]
@@ -379,7 +379,7 @@ if __name__ == "__main__":
     metrics = compute_strategy_metrics(returns)
     print_metrics_table(metrics)
 
-    from factor_utils import REGIME_SPLIT_DATE
+    from Project_6.Factor_Analysis_Monthly_Universe.factor_utils import REGIME_SPLIT_DATE
     regime_split_report(returns, REGIME_SPLIT_DATE)
 
     # Save outputs.

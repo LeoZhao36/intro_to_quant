@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from factor_utils import (
+from Project_6.Factor_Analysis_Monthly_Universe.factor_utils import (
     EP_PANEL_PATH,
     GRAPHS_DIR,
     load_panel,

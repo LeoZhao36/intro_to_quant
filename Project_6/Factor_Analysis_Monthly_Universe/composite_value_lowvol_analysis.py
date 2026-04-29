@@ -70,7 +70,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from factor_utils import (
+from Project_6.Factor_Analysis_Monthly_Universe.factor_utils import (
     DATA_DIR,
     GRAPHS_DIR,
     load_panel,
@@ -87,8 +87,8 @@ from factor_utils import (
 )
 
 # Reuse single-factor data prep functions to avoid duplication.
-from value_analysis import add_ep_to_panel
-from lowvol_analysis import add_volatility_to_panel
+from Project_6.Factor_Analysis_Monthly_Universe.value_analysis import add_ep_to_panel
+from Project_6.Factor_Analysis_Monthly_Universe.lowvol_analysis import add_volatility_to_panel
 
 
 # ─── Configuration ─────────────────────────────────────────────────────
