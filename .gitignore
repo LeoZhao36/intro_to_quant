@@ -25,4 +25,6 @@ Thumbs.db
 
 # === Optional: data caches ===
 data/
+daily_panel/
+folder_structure.txt
 .claude
