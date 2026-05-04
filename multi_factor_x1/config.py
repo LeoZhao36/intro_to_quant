@@ -42,6 +42,13 @@ UNIVERSE_PANEL_PATH = DATA_DIR / "universe_membership_seven.parquet"
 DAILY_METRICS_PATH = DATA_DIR / "daily_universe_metrics.parquet"
 SUMMARY_TABLE_PATH = DATA_DIR / "universe_inspection_summary.csv"
 
+# Three-universe pipeline (post-decision: U6 base, with the three variants
+# A / B / C). These are the names used by build_three_universes.py and
+# inspect_three_universes.py.
+THREE_UNIVERSE_PANEL_PATH = DATA_DIR / "universe_membership_three.parquet"
+THREE_DAILY_METRICS_PATH = DATA_DIR / "daily_three_universe_metrics.parquet"
+THREE_SUMMARY_TABLE_PATH = DATA_DIR / "three_universe_inspection_summary.csv"
+
 GRAPHS_DIR = Path("graphs")
 GRAPHS_DIR.mkdir(exist_ok=True)
 
@@ -79,6 +86,23 @@ REGIME_LABELS = {
     "W2_NNA_to_PBoC":  "新国九条 to PBoC stimulus (2024-04-12 to 2024-09-23)",
     "W3_post_PBoC":    "Post PBoC stimulus (2024-09-24 to today)",
     "W4_post_NNA":     "All post 新国九条 (2024-04-12 to today)",
+}
+
+
+# Three-window regime split used by inspect_three_universes.py.
+# α = all-data, β = pre-新国九条, γ = post-新国九条. α is just β ∪ γ;
+# we report all three for convenience but β and γ are the only
+# independent partitions.
+THREE_REGIME_WINDOWS = {
+    "alpha_all":      (PANEL_START,            PANEL_END),
+    "beta_pre_NNA":   (PANEL_START,            NEW_NINE_ARTICLES_DATE - pd.Timedelta(days=1)),
+    "gamma_post_NNA": (NEW_NINE_ARTICLES_DATE, PANEL_END),
+}
+
+THREE_REGIME_LABELS = {
+    "alpha_all":      "All data (2019-01 to today)",
+    "beta_pre_NNA":   "Pre 新国九条 (2019-01 to 2024-04-11)",
+    "gamma_post_NNA": "Post 新国九条 (2024-04-12 to today)",
 }
 
 
@@ -160,3 +184,85 @@ LIMIT_PCT_CHINEXT  = 0.20  # post 2020-08-24; before that it was 0.10
 LIMIT_PCT_STAR     = 0.20
 LIMIT_PCT_ST       = 0.05  # ST/*ST on Main; rises to 10% on 2026-07-06 per CSRC
 CHINEXT_REGIME_CHANGE = pd.Timestamp("2020-08-24")
+
+
+# ─── Three-universe pipeline (the decision after the seven-way inspection)
+# ──────────────────────────────────────────────────────────────────────
+#
+# After reading universe_inspection_summary.csv, we settled on U6
+# (outside-CSI800 raw) as the candidate base, with three variants:
+#
+#   A. base:     U6_clean = outside-CSI800 + sub-new exclusion + standard
+#                ST / 北交所 / delisting filters. No price or liquidity
+#                floor. The "raw retail" universe; ~3,800-4,100 names.
+#
+#   B. price:    Same as A, plus close ≥ PRICE_FLOOR_RMB on rebalance date.
+#                Defends against 面值退市 risk. Drops ~50-150 names per
+#                rebalance.
+#
+#   C. floored:  Same as A, plus a parameterized liquidity floor. The
+#                parameters are deliberately exposed so we can sweep them
+#                later. Default is the relaxed setting (40th percentile,
+#                2000万 absolute, 20 min days), which sits between
+#                Project 6's tight floor (75/3000/20) and no floor at all.
+
+from dataclasses import dataclass
+
+
+# Sub-new IPO exclusion: stocks must have been listed for at least this
+# many TRADING DAYS before the rebalance date to enter any of A/B/C.
+# 120 trading days ≈ 6 months, conservative against first-year IPO
+# volatility (no price limits in first 5 days, settle-down period).
+SUB_NEW_THRESHOLD_TRADING_DAYS = 120
+
+# Price floor for variant B. Stocks with close < this on the rebalance
+# date are excluded. 1.5元 is a defensive buffer above the 1元 forced-
+# delisting threshold (面值退市: 20-day average close < 1元 triggers
+# forced delisting per the 新国九条 reforms).
+PRICE_FLOOR_RMB = 1.5
+
+
+@dataclass(frozen=True)
+class LiquidityFloorParams:
+    """
+    Parameters for the relaxed liquidity floor used by Universe C.
+
+    Three knobs, each with a different mechanism:
+      - pct_threshold:     keep top X% by 60-day mean amount, computed
+                            within the candidate pool (post sub-new and
+                            ST filters but before the floor itself)
+      - abs_threshold_wan: drop stocks with 60-day mean amount below
+                            this many 万元
+      - min_days:          drop stocks with fewer than this many observed
+                            trading days in the 60-day trailing window
+
+    All three apply jointly (intersection). The Project 6 baseline used
+    (0.75, 3000, 20). The default here uses (0.40, 2000, 20), which keeps
+    the bottom 60% of stocks above the absolute floor but tightens the
+    floor in absolute 万 terms relative to no floor at all.
+    """
+    pct_threshold: float = 0.40
+    abs_threshold_wan: int = 2000
+    min_days: int = 20
+
+    def label(self) -> str:
+        return f"pct{int(self.pct_threshold*100)}_abs{self.abs_threshold_wan}_d{self.min_days}"
+
+
+DEFAULT_LIQUIDITY_FLOOR = LiquidityFloorParams(
+    pct_threshold=0.40, abs_threshold_wan=2000, min_days=20
+)
+
+
+THREE_UNIVERSE_KEYS = [
+    "A_u6_clean",       # raw outside-CSI800 + sub-new exclusion
+    "B_u6_price",       # A + price floor
+    "C_u6_floored",     # A + relaxed liquidity floor (parametrized)
+]
+
+THREE_UNIVERSE_LABELS = {
+    "A_u6_clean":     "U6 clean (outside-CSI800, no floor)",
+    "B_u6_price":     f"U6 + price≥{PRICE_FLOOR_RMB}元",
+    "C_u6_floored":   f"U6 + liquidity floor "
+                      f"({DEFAULT_LIQUIDITY_FLOOR.label()})",
+}
